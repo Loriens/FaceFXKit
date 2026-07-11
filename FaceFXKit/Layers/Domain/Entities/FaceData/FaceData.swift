@@ -9,7 +9,7 @@ import Foundation
 import Vision
 import CoreGraphics
 
-struct FaceData {
+struct FaceData: Sendable {
     let id: UUID
     let observation: FaceObservation
     let boundingBox: NormalizedRect

@@ -31,7 +31,7 @@ final class HeadSizeFilter: CIFilter, @unchecked Sendable {
 
     override var outputImage: CIImage? {
         guard let inputImage, let inputCenter, let kernel = Self.kernel else {
-            print("⚠️ HeadPerspectiveResizeFilter: Missing required inputs")
+            print("⚠️ HeadSizeFilter: Missing required inputs")
             return inputImage
         }
 

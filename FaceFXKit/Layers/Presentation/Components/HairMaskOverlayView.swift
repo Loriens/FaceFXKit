@@ -10,28 +10,24 @@ import CoreImage
 
 struct HairMaskOverlayView: View {
     let hairData: HairSegmentationResult
-    let imageSize: CGSize
     let imageScale: CGFloat
     let imageOffset: CGSize
     let opacity: Double
-    
-    @State private var imageFrameLocal: CGRect = .zero
+
     @State private var overlayImage: CGImage?
-    
+
     init(
         hairData: HairSegmentationResult,
-        imageSize: CGSize,
         imageScale: CGFloat,
         imageOffset: CGSize,
         opacity: Double = 0.6
     ) {
         self.hairData = hairData
-        self.imageSize = imageSize
         self.imageScale = imageScale
         self.imageOffset = imageOffset
         self.opacity = opacity
     }
-    
+
     var body: some View {
         ZStack {
             if let overlayImage {
@@ -44,35 +40,33 @@ struct HairMaskOverlayView: View {
                     .blendMode(.multiply)
             }
         }
-        .onAppear {
-            generateOverlayImage()
-        }
-        .onChange(of: hairData.originalHairMask) { _, _ in
-            generateOverlayImage()
-        }
-    }
-    
-    private func generateOverlayImage() {
-        Task {
-            let image = await createColoredHairMask()
-            await MainActor.run {
-                self.overlayImage = image
-            }
+        // `.task(id:)` cancels and restarts the render when the mask changes and
+        // on disappear, so a stale render can never overwrite a newer one.
+        .task(id: hairData.originalHairMask) {
+            let context = DIContainer.shared.ciContextStore.primaryContext
+            overlayImage = await Self.createColoredHairMask(
+                from: hairData.originalHairMask,
+                using: context
+            )
         }
     }
-    
-    private func createColoredHairMask() async -> CGImage? {
+
+    /// Renders the tinted hair mask off the main actor using the shared context.
+    @concurrent
+    private nonisolated static func createColoredHairMask(
+        from hairMask: CIImage,
+        using context: CIContext
+    ) async -> CGImage? {
         let colorMatrix = CIFilter(name: "CIColorMatrix")!
-        colorMatrix.setValue(hairData.originalHairMask, forKey: kCIInputImageKey)
+        colorMatrix.setValue(hairMask, forKey: kCIInputImageKey)
 
         colorMatrix.setValue(CIVector(x: 0.0, y: 0.0, z: 0.0, w: 0.0), forKey: "inputRVector")
         colorMatrix.setValue(CIVector(x: 0.0, y: 1.0, z: 0.0, w: 0.0), forKey: "inputGVector")
         colorMatrix.setValue(CIVector(x: 0.0, y: 1.0, z: 1.0, w: 0.0), forKey: "inputBVector")
         colorMatrix.setValue(CIVector(x: 0.0, y: 0.0, z: 0.0, w: 1.0), forKey: "inputAVector")
-        
+
         guard let coloredMask = colorMatrix.outputImage else { return nil }
 
-        let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
         return context.createCGImage(coloredMask, from: coloredMask.extent)
     }
 }

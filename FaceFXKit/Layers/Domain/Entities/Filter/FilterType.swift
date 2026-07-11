@@ -48,10 +48,25 @@ enum FilterType: String, CaseIterable, Codable {
     }
 
     var group: FilterGroup {
-        FilterGroup.allCases.first { $0.filterTypes.contains(self) } ?? .head
+        guard let group = Self.groupByType[self] else {
+            preconditionFailure("FilterType \(self) is not listed in any FilterGroup.filterTypes")
+        }
+        return group
     }
 
     var category: FilterCategory {
         group.category
     }
+
+    /// `FilterGroup.filterTypes` is the single source of truth; this map is its
+    /// cached inversion, shared by every reverse lookup.
+    private static let groupByType: [FilterType: FilterGroup] = {
+        var map: [FilterType: FilterGroup] = [:]
+        for group in FilterGroup.allCases {
+            for type in group.filterTypes {
+                map[type] = group
+            }
+        }
+        return map
+    }()
 }

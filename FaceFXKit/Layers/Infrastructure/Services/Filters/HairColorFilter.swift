@@ -21,7 +21,7 @@ final class HairColorFilter: CIFilter, @unchecked Sendable {
             let data = try? Data(contentsOf: url),
             let kernel = try? CIColorKernel(functionName: "hairColor", fromMetalLibraryData: data)
         else {
-            fatalError("HairColorFilter: Could not load HairColor.metal")
+            fatalError("HairColorFilter: Could not load HairColorFilter.metal")
         }
         
         return kernel
@@ -98,6 +98,23 @@ extension HairColorFilter {
             case .auburn: return "Auburn"
             case .copper: return "Copper"
             case .burgundy: return "Burgundy"
+            }
+        }
+
+        /// Maps a hair-color filter type to its color; `nil` for every other filter.
+        init?(filterType: FilterType) {
+            switch filterType {
+            case .hairColorBlack: self = .black
+            case .hairColorDarkBrown: self = .darkBrown
+            case .hairColorBrown: self = .brown
+            case .hairColorLightBrown: self = .lightBrown
+            case .hairColorBlonde: self = .blonde
+            case .hairColorPlatinumBlonde: self = .platinumBlonde
+            case .hairColorRed: self = .red
+            case .hairColorAuburn: self = .auburn
+            case .hairColorCopper: self = .copper
+            case .hairColorBurgundy: self = .burgundy
+            default: return nil
             }
         }
     }

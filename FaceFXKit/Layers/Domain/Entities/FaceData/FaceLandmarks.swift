@@ -8,7 +8,7 @@
 import Foundation
 import Vision
 
-struct FaceLandmarks {
+struct FaceLandmarks: Sendable {
     let all: FaceObservation.Landmarks2D.Region
     let nose: FaceObservation.Landmarks2D.Region
     let leftEye: FaceObservation.Landmarks2D.Region

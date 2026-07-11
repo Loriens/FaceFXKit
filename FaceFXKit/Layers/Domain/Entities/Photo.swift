@@ -9,6 +9,8 @@ import Foundation
 import UIKit
 import CoreImage
 
+/// @unchecked Sendable safety invariant: `CIImage` is an immutable filter
+/// recipe, and all mutation of this struct is by-value.
 struct Photo: @unchecked Sendable {
     let id: UUID
     let originalImage: CIImage

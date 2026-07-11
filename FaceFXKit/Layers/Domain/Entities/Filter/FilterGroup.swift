@@ -36,6 +36,21 @@ enum FilterGroup: String, CaseIterable, Codable {
     }
 
     var category: FilterCategory {
-        FilterCategory.allCases.first { $0.groups.contains(self) } ?? .sizes
+        guard let category = Self.categoryByGroup[self] else {
+            preconditionFailure("FilterGroup \(self) is not listed in any FilterCategory.groups")
+        }
+        return category
     }
+
+    /// `FilterCategory.groups` is the single source of truth; this map is its
+    /// cached inversion.
+    private static let categoryByGroup: [FilterGroup: FilterCategory] = {
+        var map: [FilterGroup: FilterCategory] = [:]
+        for category in FilterCategory.allCases {
+            for group in category.groups {
+                map[group] = category
+            }
+        }
+        return map
+    }()
 }

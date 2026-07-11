@@ -9,49 +9,69 @@ import Foundation
 import UIKit
 import CoreImage
 
-@Observable
+/// Orchestrates photo editing: runs the detection required by a filter's
+/// category, applies the filter, and saves results.
+///
+/// @unchecked Sendable safety invariant: all stored properties are immutable
+/// (`let`) references to services that are either actors
+/// (`DefaultVisionFaceTrackingService`, `DefaultHairSegmentationService`) or
+/// internally thread-safe (see each type's own invariant).
 final class PhotoEditorApplicationService: @unchecked Sendable {
-    private let applyFiltersUseCase: ApplyFiltersUseCase
-    private let photoRepository: PhotoRepository
-    private let faceTrackingRepository: FaceTrackingRepository
-    private let hairSegmentationRepository: HairSegmentationRepository
-    
+    private let filterProcessingService: FilterProcessingService
+    private let photoStorageService: PhotoStorageService
+    private let faceTrackingService: VisionFaceTrackingService
+    private let hairSegmentationService: HairSegmentationService
+
     init(
-        applyFiltersUseCase: ApplyFiltersUseCase,
-        photoRepository: PhotoRepository,
-        faceTrackingRepository: FaceTrackingRepository,
-        hairSegmentationRepository: HairSegmentationRepository
+        filterProcessingService: FilterProcessingService,
+        photoStorageService: PhotoStorageService,
+        faceTrackingService: VisionFaceTrackingService,
+        hairSegmentationService: HairSegmentationService
     ) {
-        self.applyFiltersUseCase = applyFiltersUseCase
-        self.photoRepository = photoRepository
-        self.faceTrackingRepository = faceTrackingRepository
-        self.hairSegmentationRepository = hairSegmentationRepository
+        self.filterProcessingService = filterProcessingService
+        self.photoStorageService = photoStorageService
+        self.faceTrackingService = faceTrackingService
+        self.hairSegmentationService = hairSegmentationService
     }
-    
+
     func applyFilters(
         to photo: Photo,
         configuration: FilterConfiguration,
         detectionData: DetectionData? = nil
     ) async throws -> Photo {
-        return try await applyFiltersUseCase.execute(
-            photo: photo,
-            configuration: configuration,
-            detectionData: detectionData
+        let resolvedDetectionData: DetectionData
+        if let detectionData {
+            resolvedDetectionData = detectionData
+        } else {
+            resolvedDetectionData = try await detectData(
+                in: photo.originalImage,
+                for: configuration.filter.category
+            )
+        }
+
+        let processedImage = try filterProcessingService.applyFilters(
+            to: photo.originalImage,
+            with: configuration,
+            detectionData: resolvedDetectionData
         )
+
+        var updatedPhoto = photo
+        updatedPhoto.updateProcessedImage(processedImage)
+        return updatedPhoto
     }
-    
+
     func savePhoto(_ photo: Photo) async throws {
-        try await photoRepository.savePhoto(photo)
+        try await photoStorageService.savePhoto(photo)
     }
-    
+
     func detectData(in ciImage: CIImage, for category: FilterCategory) async throws -> DetectionData {
         switch category {
         case .sizes:
-            let faceResult = try await faceTrackingRepository.detectFaces(in: ciImage)
+            let faceResult = try await faceTrackingService.detectFaces(in: ciImage)
             return DetectionData.faceLandmarks(faceResult)
         case .hair:
-            let hairResult = try await hairSegmentationRepository.segmentHair(in: ciImage)
+            let hairResult = try await hairSegmentationService.segmentHair(in: ciImage)
             return DetectionData.hairSegmentation(hairResult)
         }
     }
-} 
+}

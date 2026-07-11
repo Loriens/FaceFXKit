@@ -17,9 +17,9 @@ final class MainViewModel {
     var errorMessage: String?
     
     private let photoPickingService: PhotosUIPickingService
-    
+
     init() {
-        self.photoPickingService = DIContainer.shared.photoPickingService as! PhotosUIPickingService
+        self.photoPickingService = DIContainer.shared.photoPickingService
     }
     
     func selectPhotoFromGallery(item: PhotosPickerItem) async {

@@ -22,8 +22,7 @@ actor DefaultVisionFaceTrackingService: VisionFaceTrackingService {
     }
 
     private let faceRectangleRequest = DetectFaceRectanglesRequest(.revision3)
-    private var faceLandmarksRequest = DetectFaceLandmarksRequest(.revision3)
-    
+
     func detectFaces(in ciImage: CIImage) async throws -> FaceTrackingResult {
         let faces = try await faceRectangleRequest.perform(on: ciImage)
 
@@ -31,6 +30,9 @@ actor DefaultVisionFaceTrackingService: VisionFaceTrackingService {
             throw FaceTrackingError.noFacesDetected
         }
 
+        // Local request: keeping this as actor state would race across
+        // reentrant calls between the assignment and `perform`.
+        var faceLandmarksRequest = DetectFaceLandmarksRequest(.revision3)
         faceLandmarksRequest.inputFaceObservations = faces
 
         let landmarksResults = try await faceLandmarksRequest.perform(on: ciImage)

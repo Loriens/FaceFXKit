@@ -9,6 +9,8 @@ import Foundation
 import CoreImage
 import UIKit
 
+/// @unchecked Sendable safety invariant: all fields are immutable and
+/// `CIImage` is an immutable filter recipe.
 struct HairSegmentationResult: @unchecked Sendable {
     let imageSize: CGSize
     let hairMask: CIImage

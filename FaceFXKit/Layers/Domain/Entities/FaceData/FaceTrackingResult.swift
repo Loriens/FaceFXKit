@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct FaceTrackingResult {
+struct FaceTrackingResult: Sendable {
     let faces: [FaceData]
     let imageSize: CGSize
     let processedAt: Date

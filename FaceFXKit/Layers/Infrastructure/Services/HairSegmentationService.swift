@@ -36,6 +36,11 @@ actor DefaultHairSegmentationService: HairSegmentationService {
     private let model: FaceParsing
     private let context: CIContext
     private let modelInputSize: CGSize = CGSize(width: 512, height: 512)
+
+    /// Name of the FaceParsing model's segmentation output layer.
+    private static let segmentationOutputFeatureName = "455"
+    /// Index of the "hair" class in the FaceParsing segmentation map.
+    private static let hairClassIndex = 17
     
     init() throws {
         do {
@@ -53,7 +58,9 @@ actor DefaultHairSegmentationService: HairSegmentationService {
         let resizedImage = prepareImageForModel(ciImage)
         let pixelBuffer = try createPixelBuffer(from: resizedImage)
 
+        try Task.checkCancellation()
         let prediction = try await runModelPrediction(pixelBuffer: pixelBuffer)
+        try Task.checkCancellation()
 
         let hairMask = try extractHairMask(from: prediction)
         let scaledMask = scaleMaskToOriginalSize(hairMask, originalSize: ciImage.extent.size)
@@ -137,35 +144,38 @@ actor DefaultHairSegmentationService: HairSegmentationService {
     
     private func extractHairMask(from prediction: MLFeatureProvider) throws -> CIImage {
         guard
-            let outputFeature = prediction.featureValue(for: "455"),
+            let outputFeature = prediction.featureValue(for: Self.segmentationOutputFeatureName),
             let multiArray = outputFeature.multiArrayValue
         else {
             throw HairSegmentationError.processingFailed("Invalid model output format")
         }
 
         let hairMask = try createHairMaskFromMultiArray(multiArray)
-        
+
         return hairMask
     }
-    
+
     private func createHairMaskFromMultiArray(_ multiArray: MLMultiArray) throws -> CIImage {
         let segmentationResult = SegmentationMultiArray(mlMultiArray: multiArray)
         let width = segmentationResult.width
         let height = segmentationResult.height
 
         var maskData = Data(count: width * height)
-        
-        maskData.withUnsafeMutableBytes { bytes in
+
+        try maskData.withUnsafeMutableBytes { bytes in
             let pixelPtr = bytes.bindMemory(to: UInt8.self)
-            
+
             for x in 0..<width {
+                // The 512×512 scan is the slowest CPU part of segmentation —
+                // bail out promptly when the caller has moved on.
+                try Task.checkCancellation()
+
                 for y in 0..<height {
                     // Get the segmentation class for this pixel
                     let segmentationClass = segmentationResult[x, y].intValue
-                    
-                    // Hair class is index 17
-                    let isHair = segmentationClass == 17
-                    
+
+                    let isHair = segmentationClass == Self.hairClassIndex
+
                     // Convert to binary mask
                     let pixelIndex = x * height + y
                     pixelPtr[pixelIndex] = isHair ? 255 : 0
@@ -201,24 +211,5 @@ actor DefaultHairSegmentationService: HairSegmentationService {
         let scaleY = originalSize.height / mask.extent.height
         
         return mask.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-    }
-}
-
-// MARK: - Helper Extensions
-
-private extension CIImage {
-    func pixelColor(at point: CGPoint, context: CIContext) -> (red: Float, green: Float, blue: Float, alpha: Float) {
-        let bitmap = UnsafeMutablePointer<UInt8>.allocate(capacity: 4)
-        defer { bitmap.deallocate() }
-        
-        let rect = CGRect(x: point.x, y: point.y, width: 1, height: 1)
-        context.render(self, toBitmap: bitmap, rowBytes: 4, bounds: rect, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
-        
-        return (
-            red: Float(bitmap[0]) / 255.0,
-            green: Float(bitmap[1]) / 255.0,
-            blue: Float(bitmap[2]) / 255.0,
-            alpha: Float(bitmap[3]) / 255.0
-        )
     }
 }

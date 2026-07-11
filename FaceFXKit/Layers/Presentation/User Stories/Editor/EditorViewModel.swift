@@ -10,13 +10,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class EditorViewModel {
-    var photo: Photo? {
-        didSet {
-            if let ciImage = photo?.processedImage ?? photo?.currentImage {
-                self.currentImage = ciContextStore.createCGImage(from: ciImage)
-            }
-        }
-    }
+    var photo: Photo?
     var selectedCategory: FilterCategory?
     var isShowingFilters = false
     var selectedGroupFilter: FilterGroup?
@@ -26,20 +20,21 @@ final class EditorViewModel {
     var showLandmarks = false
     var showHairMask = false
     var errorMessage: String?
-    var imageScale: CGFloat = 1.0
-    var imageOffset: CGSize = .zero
-    var lastScale: CGFloat = 1.0
-    var lastOffset: CGSize = .zero
+    var zoomPan = ImageZoomPanModel()
 
     var cachedDetectionData: DetectionData?
-    private let applicationService: PhotoEditorApplicationService
-    private let ciContextStore: CIContextStore
 
-    var currentImage: CGImage?
-    
-    var currentCIImage: CIImage? {
+    /// The image the Metal preview draws. Computed from `photo`, so every
+    /// committed filter render publishes a new preview automatically.
+    var previewImage: CIImage? {
         photo?.currentImage
     }
+
+    private let applicationService: PhotoEditorApplicationService
+
+    @ObservationIgnored private var filterUpdateTask: Task<Void, Never>?
+    @ObservationIgnored private var detectionTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingConfiguration: FilterConfiguration?
 
     init(
         photo: Photo?,
@@ -47,10 +42,44 @@ final class EditorViewModel {
     ) {
         self.photo = photo
         self.applicationService = applicationService
-        self.ciContextStore = DIContainer.shared.ciContextStore
+    }
 
-        if let ciImage = photo?.currentImage {
-            self.currentImage = ciContextStore.createCGImage(from: ciImage)
+    /// Cancels any in-flight work when the editor goes away.
+    func cancelPendingWork() {
+        pendingConfiguration = nil
+        filterUpdateTask?.cancel()
+        filterUpdateTask = nil
+        detectionTask?.cancel()
+    }
+
+    // MARK: - Filters
+
+    /// Applies a new slider intensity. Renders go through a single coalescing
+    /// loop: every completed render commits immediately (live preview while
+    /// dragging), values that arrive mid-render replace the pending one instead
+    /// of queueing, and because renders are serialized a stale result can never
+    /// overwrite a newer one.
+    func setFilterIntensity(_ intensity: Float) {
+        selectedFilterConfiguration?.updateFilter(intensity: intensity)
+        guard let configuration = selectedFilterConfiguration else { return }
+
+        pendingConfiguration = configuration
+        startRenderLoopIfNeeded()
+    }
+
+    private func startRenderLoopIfNeeded() {
+        guard filterUpdateTask == nil else { return }
+
+        filterUpdateTask = Task {
+            while !Task.isCancelled, let configuration = pendingConfiguration {
+                pendingConfiguration = nil
+                await updateFilter(configuration: configuration)
+            }
+            // A cancelled loop must not clear the slot — a fresh loop may
+            // already own it.
+            if !Task.isCancelled {
+                filterUpdateTask = nil
+            }
         }
     }
 
@@ -67,8 +96,13 @@ final class EditorViewModel {
                 configuration: configuration,
                 detectionData: detectionDataToUse
             )
+
+            guard !Task.isCancelled else { return }
             self.photo = processedPhoto
+        } catch is CancellationError {
+            // Superseded by a newer intensity value — drop the stale result.
         } catch {
+            guard !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -76,25 +110,16 @@ final class EditorViewModel {
     func selectCategory(_ category: FilterCategory) {
         selectedCategory = category
 
-        // For categories that require detection, we need to detect first
-        if category == .sizes || category == .hair {
+        // Every category requires detection data (face landmarks or hair mask).
+        withAnimation(.easeInOut(duration: 0.3)) {
+            isFaceDetecting = true
+        }
+        detectionTask?.cancel()
+        detectionTask = Task {
+            await detectDataIfNeeded()
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.3)) {
-                isFaceDetecting = true
-            }
-            Task {
-                await detectDataIfNeeded()
-                await MainActor.run {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isFaceDetecting = false
-                        isShowingFilters = true
-                        isShowingIndividualFilters = false
-                        selectedGroupFilter = nil
-                        selectedFilterConfiguration = nil
-                    }
-                }
-            }
-        } else {
-            withAnimation(.easeInOut(duration: 0.3)) {
+                isFaceDetecting = false
                 isShowingFilters = true
                 isShowingIndividualFilters = false
                 selectedGroupFilter = nil
@@ -105,20 +130,19 @@ final class EditorViewModel {
 
     private func detectDataIfNeeded() async {
         guard let photo, let selectedCategory else { return }
+        guard cachedDetectionData?.categories.contains(selectedCategory) != true else { return }
 
-        await MainActor.run {
-            errorMessage = nil
-        }
+        errorMessage = nil
 
         do {
             let detectionData = try await applicationService.detectData(in: photo.originalImage, for: selectedCategory)
-            await MainActor.run {
-                cachedDetectionData = detectionData
-            }
+            guard !Task.isCancelled else { return }
+            cachedDetectionData = detectionData
+        } catch is CancellationError {
+            // The editor was dismissed or the category changed mid-detection.
         } catch {
-            await MainActor.run {
-                errorMessage = "Failed to detect data: \(error.localizedDescription)"
-            }
+            guard !Task.isCancelled else { return }
+            errorMessage = "Failed to detect data: \(error.localizedDescription)"
         }
     }
 
@@ -134,11 +158,6 @@ final class EditorViewModel {
 
     func selectIndividualFilter(_ filterType: FilterType) {
         selectedFilterConfiguration = FilterConfiguration(filter: filterType, intensity: 0.0)
-    }
-
-    func updateFilterIntensity(_ intensity: Float) async {
-        guard let selectedFilterConfiguration else { return }
-        await updateFilter(configuration: selectedFilterConfiguration)
     }
 
     func backToGroupFilters() {
@@ -168,93 +187,13 @@ final class EditorViewModel {
         return groupFilter.filterTypes
     }
 
-    func resetZoom() {
-        withAnimation(.spring()) {
-            imageScale = 1.0
-            imageOffset = .zero
-            lastScale = 1.0
-            lastOffset = .zero
-        }
-    }
-
-    func updateScale(_ scale: CGFloat, in containerSize: CGSize) {
-        imageScale = max(0.7, min(scale, 5.0))
-        constrainOffset(in: containerSize)
-    }
-
-    func finalizeScale() {
-        let constrainedScale = max(1.0, min(imageScale, 5.0))
-
-        if imageScale < 1.0 {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                imageScale = constrainedScale
-                imageOffset = .zero
-            }
-        }
-
-        lastScale = constrainedScale
-        lastOffset = imageOffset
-    }
-
-    func constrainOffset(in containerSize: CGSize) {
-        guard let image = currentImage else { return }
-
-        let imageSize = calculateImageSize(image, in: containerSize)
-        let scaledImageSize = CGSize(
-            width: imageSize.width * imageScale,
-            height: imageSize.height * imageScale
-        )
-
-        if imageScale < 1.0 {
-            imageOffset = .zero
-            return
-        }
-
-        let maxOffsetX = max(0, (scaledImageSize.width - containerSize.width) / 2)
-        let maxOffsetY = max(0, (scaledImageSize.height - containerSize.height) / 2)
-
-        imageOffset = CGSize(
-            width: max(-maxOffsetX, min(maxOffsetX, imageOffset.width)),
-            height: max(-maxOffsetY, min(maxOffsetY, imageOffset.height))
-        )
-    }
-
-    func updateOffset(_ translation: CGSize, in containerSize: CGSize) {
-        guard let image = currentImage else { return }
-
-        if imageScale < 1.0 {
-            imageOffset = .zero
-            return
-        }
-
-        let imageSize = calculateImageSize(image, in: containerSize)
-        let scaledImageSize = CGSize(
-            width: imageSize.width * imageScale,
-            height: imageSize.height * imageScale
-        )
-
-        let maxOffsetX = max(0, (scaledImageSize.width - containerSize.width) / 2)
-        let maxOffsetY = max(0, (scaledImageSize.height - containerSize.height) / 2)
-
-        let newOffset = CGSize(
-            width: lastOffset.width + translation.width,
-            height: lastOffset.height + translation.height
-        )
-
-        imageOffset = CGSize(
-            width: max(-maxOffsetX, min(maxOffsetX, newOffset.width)),
-            height: max(-maxOffsetY, min(maxOffsetY, newOffset.height))
-        )
-    }
-
-    func finalizeOffset() {
-        lastOffset = imageOffset
-    }
-
-    func resetAllFilters() async {
+    func resetAllFilters() {
         guard var photo else { return }
 
         errorMessage = nil
+        pendingConfiguration = nil
+        filterUpdateTask?.cancel()
+        filterUpdateTask = nil
 
         if let selectedFilterConfiguration {
             self.selectedFilterConfiguration = FilterConfiguration(
@@ -283,23 +222,45 @@ final class EditorViewModel {
     func toggleLandmarks() {
         showLandmarks.toggle()
     }
-    
+
     func toggleHairMask() {
         showHairMask.toggle()
     }
 
-    private func calculateImageSize(_ image: CGImage, in containerSize: CGSize) -> CGSize {
-        let imageAspectRatio = CGFloat(image.width) / CGFloat(image.height)
-        let containerAspectRatio = containerSize.width / containerSize.height
+    // MARK: - Zoom & Pan
 
-        if imageAspectRatio > containerAspectRatio {
-            // Image is wider than container
-            let height = containerSize.width / imageAspectRatio
-            return CGSize(width: containerSize.width, height: height)
-        } else {
-            // Image is taller than container
-            let width = containerSize.height * imageAspectRatio
-            return CGSize(width: width, height: containerSize.height)
+    func resetZoom() {
+        withAnimation(.spring()) {
+            zoomPan.reset()
         }
+    }
+
+    func updateScale(_ scale: CGFloat, in containerSize: CGSize) {
+        guard let imagePixelSize = currentImagePixelSize else { return }
+        zoomPan.updateScale(scale, imagePixelSize: imagePixelSize, containerSize: containerSize)
+    }
+
+    func finalizeScale() {
+        if zoomPan.scale < 1.0 {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                _ = zoomPan.finalizeScale()
+            }
+        } else {
+            _ = zoomPan.finalizeScale()
+        }
+    }
+
+    func updateOffset(_ translation: CGSize, in containerSize: CGSize) {
+        guard let imagePixelSize = currentImagePixelSize else { return }
+        zoomPan.updateOffset(translation: translation, imagePixelSize: imagePixelSize, containerSize: containerSize)
+    }
+
+    func finalizeOffset() {
+        zoomPan.finalizeOffset()
+    }
+
+    private var currentImagePixelSize: CGSize? {
+        guard let previewImage else { return nil }
+        return previewImage.extent.size
     }
 }
