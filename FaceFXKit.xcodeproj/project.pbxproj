@@ -14,7 +14,7 @@
 		76C5E2712E21A23100659D7A /* Exceptions for "FaceFXKit" folder in "FaceFXKit" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
+				Application/Info.plist,
 			);
 			target = 76C5E1A52E21901D00659D7A /* FaceFXKit */;
 		};
@@ -190,7 +190,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INFOPLIST_FILE = FaceFXKit/Info.plist;
+				INFOPLIST_FILE = FaceFXKit/Application/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
@@ -249,7 +249,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INFOPLIST_FILE = FaceFXKit/Info.plist;
+				INFOPLIST_FILE = FaceFXKit/Application/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
@@ -271,7 +271,7 @@
 				DEVELOPMENT_TEAM = TV76LZZGYZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = FaceFXKit/Info.plist;
+				INFOPLIST_FILE = FaceFXKit/Application/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -285,7 +285,7 @@
 				MARKETING_VERSION = 1.0;
 				MTLLINKER_FLAGS = "-fcikernel";
 				MTL_COMPILER_FLAGS = "-fcikernel";
-				MTL_HEADER_SEARCH_PATHS = "${PROJECT_DIR}/FaceFXKit/Resources/Shaders/";
+				MTL_HEADER_SEARCH_PATHS = "${PROJECT_DIR}/FaceFXKit/Application/Resources/Shaders/";
 				MTL_LANGUAGE_REVISION = Metal32;
 				PRODUCT_BUNDLE_IDENTIFIER = markov.vladislav.FaceFXKit;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -305,7 +305,7 @@
 				DEVELOPMENT_TEAM = TV76LZZGYZ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = FaceFXKit/Info.plist;
+				INFOPLIST_FILE = FaceFXKit/Application/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -319,7 +319,7 @@
 				MARKETING_VERSION = 1.0;
 				MTLLINKER_FLAGS = "-fcikernel";
 				MTL_COMPILER_FLAGS = "-fcikernel";
-				MTL_HEADER_SEARCH_PATHS = "${PROJECT_DIR}/FaceFXKit/Resources/Shaders/";
+				MTL_HEADER_SEARCH_PATHS = "${PROJECT_DIR}/FaceFXKit/Application/Resources/Shaders/";
 				MTL_LANGUAGE_REVISION = Metal32;
 				PRODUCT_BUNDLE_IDENTIFIER = markov.vladislav.FaceFXKit;
 				PRODUCT_NAME = "$(TARGET_NAME)";

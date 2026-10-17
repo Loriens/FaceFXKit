@@ -62,3 +62,6 @@ fastlane/screenshots/**/*.png
 fastlane/test_output
 
 PROJECT_DESCRIPTION.md
+
+# macOS
+.DS_Store
