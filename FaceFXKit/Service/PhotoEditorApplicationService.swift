@@ -27,20 +27,16 @@ final class PhotoEditorApplicationService: @unchecked Sendable {
 
     func applyFilters(
         to photo: Photo,
-        configuration: FilterConfiguration,
-        detectionData: DetectionData? = nil
+        configurations: [FilterConfiguration],
+        detectionData: [FilterCategory: DetectionData]
     ) async throws -> Photo {
-        let detectionData = if let detectionData {
-            detectionData
-        } else {
-            try await detectData(in: photo.originalImage, for: configuration.filter.category)
+        let processedImage = try configurations.reduce(photo.originalImage) { image, configuration in
+            try filterProcessingService.applyFilters(
+                to: image,
+                with: configuration,
+                detectionData: detectionData[configuration.filter.category]
+            )
         }
-
-        let processedImage = try filterProcessingService.applyFilters(
-            to: photo.originalImage,
-            with: configuration,
-            detectionData: detectionData
-        )
 
         var updatedPhoto = photo
         updatedPhoto.updateProcessedImage(processedImage)

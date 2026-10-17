@@ -10,222 +10,257 @@ import SwiftUI
 @MainActor
 @Observable
 final class EditorViewModel {
-    var photo: Photo?
-    var selectedCategory: FilterCategory?
-    var isShowingFilters = false
-    var selectedGroupFilter: FilterGroup?
-    var isShowingIndividualFilters = false
-    var selectedFilterConfiguration: FilterConfiguration?
-    var isFaceDetecting = false
+    enum PanelLevel {
+        case categories
+        case groups
+        case adjustments
+    }
+
+    private(set) var photo: Photo
+    private(set) var panelLevel: PanelLevel = .categories
+    private(set) var selectedCategory: FilterCategory = .hair
+    private(set) var intensities: [FilterType: Float] = [:]
+    private(set) var selectedGroup: FilterGroup?
+    private(set) var selectedHairColor: FilterType?
+    private(set) var detectionCache: [FilterCategory: DetectionData] = [:]
+    private(set) var isSaving = false
+    var isComparing = false
+    var isShowingSavedConfirmation = false
     var showLandmarks = false
     var showHairMask = false
     var errorMessage: String?
     var zoomPan = ImageZoomPanModel()
 
-    var cachedDetectionData: DetectionData?
-
-    /// The image the Metal preview draws. Computed from `photo`, so every
-    /// committed filter render publishes a new preview automatically.
-    var previewImage: CIImage? {
-        photo?.currentImage
-    }
-
-    var availableGroupFilters: [FilterGroup] {
-        selectedCategory?.groups ?? []
-    }
-
-    var availableIndividualFilters: [FilterType] {
-        selectedGroupFilter?.filterTypes ?? []
-    }
+    private var selectedFilters: [FilterGroup: FilterType] = [:]
+    private var detectingCategories: Set<FilterCategory> = []
 
     private let applicationService: PhotoEditorApplicationService
     private let transitionAnimation = Animation.easeInOut(duration: 0.3)
+    private static let defaultHairColorIntensity: Float = 0.8
 
-    @ObservationIgnored private var filterUpdateTask: Task<Void, Never>?
-    @ObservationIgnored private var detectionTask: Task<Void, Never>?
-    @ObservationIgnored private var pendingConfiguration: FilterConfiguration?
+    @ObservationIgnored private var renderTask: Task<Void, Never>?
+    @ObservationIgnored private var needsRender = false
+    @ObservationIgnored private var detectionTasks: [FilterCategory: Task<Void, Never>] = [:]
 
-    init(photo: Photo?, applicationService: PhotoEditorApplicationService) {
+    init(photo: Photo, applicationService: PhotoEditorApplicationService) {
         self.photo = photo
         self.applicationService = applicationService
     }
 
-    /// Cancels any in-flight work when the editor goes away.
     func cancelPendingWork() {
-        cancelRendering()
-        detectionTask?.cancel()
+        needsRender = false
+        renderTask?.cancel()
+        renderTask = nil
+        detectionTasks.values.forEach { $0.cancel() }
+        detectionTasks.removeAll()
+        detectingCategories.removeAll()
     }
 
-    // MARK: - Filters
-
-    /// Applies a new slider intensity. Renders go through a single coalescing
-    /// loop: every completed render commits immediately (live preview while
-    /// dragging), values that arrive mid-render replace the pending one instead
-    /// of queueing, and because renders are serialized a stale result can never
-    /// overwrite a newer one.
-    func setFilterIntensity(_ intensity: Float) {
-        selectedFilterConfiguration?.updateFilter(intensity: intensity)
-        guard let configuration = selectedFilterConfiguration else { return }
-
-        pendingConfiguration = configuration
-        startRenderLoopIfNeeded()
+    var previewImage: CIImage {
+        isComparing ? photo.originalImage : photo.currentImage
     }
 
-    private func startRenderLoopIfNeeded() {
-        guard filterUpdateTask == nil else { return }
+    var isDetecting: Bool {
+        detectingCategories.contains(selectedCategory)
+    }
 
-        filterUpdateTask = Task {
-            while !Task.isCancelled, let configuration = pendingConfiguration {
-                pendingConfiguration = nil
-                await updateFilter(configuration: configuration)
-            }
-            // A cancelled loop must not clear the slot — a fresh loop may
-            // already own it.
-            if !Task.isCancelled {
-                filterUpdateTask = nil
-            }
+    var currentDetectionData: DetectionData? {
+        detectionCache[selectedCategory]
+    }
+
+    var activeFilter: FilterType? {
+        guard let group = selectedGroup else { return nil }
+        if group == .hairColors {
+            return selectedHairColor
         }
+        return selectedFilters[group] ?? group.filterTypes.first
     }
 
-    private func cancelRendering() {
-        pendingConfiguration = nil
-        filterUpdateTask?.cancel()
-        filterUpdateTask = nil
+    var isOverlayVisible: Bool {
+        selectedCategory == .hair ? showHairMask : showLandmarks
     }
 
-    private func updateFilter(configuration: FilterConfiguration) async {
-        guard let photo, let selectedCategory else { return }
+    func intensity(of filter: FilterType) -> Float {
+        intensities[filter] ?? 0
+    }
 
-        errorMessage = nil
-
-        do {
-            let processedPhoto = try await applicationService.applyFilters(
-                to: photo,
-                configuration: configuration,
-                detectionData: detectionData(for: selectedCategory)
-            )
-
-            guard !Task.isCancelled else { return }
-            self.photo = processedPhoto
-        } catch is CancellationError {
-            // Superseded by a newer intensity value — drop the stale result.
-        } catch {
-            guard !Task.isCancelled else { return }
-            errorMessage = error.localizedDescription
+    func isEdited(_ group: FilterGroup) -> Bool {
+        if group == .hairColors {
+            return selectedHairColor != nil
         }
+        return group.filterTypes.contains { intensity(of: $0) != 0 }
+    }
+
+    var appliedConfigurations: [FilterConfiguration] {
+        [FilterCategory.hair, .sizes]
+            .flatMap(\.groups)
+            .flatMap(\.filterTypes)
+            .compactMap { filter in
+                if filter.group == .hairColors, filter != selectedHairColor {
+                    return nil
+                }
+                let intensity = intensity(of: filter)
+                return intensity == 0 ? nil : FilterConfiguration(filter: filter, intensity: intensity)
+            }
     }
 
     func selectCategory(_ category: FilterCategory) {
         selectedCategory = category
+        isComparing = false
 
-        // Every category requires detection data (face landmarks or hair mask).
-        withAnimation(transitionAnimation) {
-            isFaceDetecting = true
+        if detectionCache[category] != nil {
+            showLevel(.groups)
+        } else if !detectingCategories.contains(category) {
+            detect(category)
         }
+    }
 
-        detectionTask?.cancel()
-        detectionTask = Task {
-            await detectDataIfNeeded()
-            guard !Task.isCancelled else { return }
+    func selectGroup(_ group: FilterGroup) {
+        selectedGroup = group
+        showLevel(.adjustments)
+    }
 
-            withAnimation(transitionAnimation) {
-                isFaceDetecting = false
-                isShowingFilters = true
-                isShowingIndividualFilters = false
-                selectedGroupFilter = nil
-                selectedFilterConfiguration = nil
+    func goBack() {
+        switch panelLevel {
+        case .categories:
+            break
+        case .groups:
+            showLevel(.categories)
+        case .adjustments:
+            showLevel(.groups)
+        }
+    }
+
+    private func showLevel(_ level: PanelLevel) {
+        withAnimation(transitionAnimation) {
+            panelLevel = level
+        }
+    }
+
+    func selectFilter(_ filter: FilterType) {
+        selectedFilters[filter.group] = filter
+    }
+
+    func selectHairColor(_ filter: FilterType?) {
+        selectedHairColor = filter
+        if let filter, intensities[filter] == nil {
+            intensities[filter] = Self.defaultHairColorIntensity
+        }
+        scheduleRender()
+    }
+
+    func setActiveFilterIntensity(_ intensity: Float) {
+        guard let filter = activeFilter else { return }
+        intensities[filter] = intensity
+        scheduleRender()
+    }
+
+    func resetActiveFilter() {
+        guard let filter = activeFilter else { return }
+
+        if filter.group == .hairColors {
+            intensities[filter] = nil
+            selectHairColor(nil)
+        } else {
+            intensities[filter] = 0
+            scheduleRender()
+        }
+    }
+
+    private func scheduleRender() {
+        needsRender = true
+        guard renderTask == nil else { return }
+
+        renderTask = Task {
+            while !Task.isCancelled, needsRender {
+                needsRender = false
+                await render()
+            }
+            if !Task.isCancelled {
+                renderTask = nil
             }
         }
     }
 
-    private func detectionData(for category: FilterCategory) -> DetectionData? {
-        cachedDetectionData?.categories.contains(category) == true ? cachedDetectionData : nil
-    }
-
-    private func detectDataIfNeeded() async {
-        guard let photo, let selectedCategory, detectionData(for: selectedCategory) == nil else { return }
-
-        errorMessage = nil
-
+    private func render() async {
         do {
-            let detectionData = try await applicationService.detectData(in: photo.originalImage, for: selectedCategory)
+            let processedPhoto = try await applicationService.applyFilters(
+                to: photo,
+                configurations: appliedConfigurations,
+                detectionData: detectionCache
+            )
+
             guard !Task.isCancelled else { return }
-            cachedDetectionData = detectionData
+            photo = processedPhoto
         } catch is CancellationError {
-            // The editor was dismissed or the category changed mid-detection.
         } catch {
             guard !Task.isCancelled else { return }
-            errorMessage = "Failed to detect data: \(error.localizedDescription)"
+            errorMessage = error.localizedDescription
         }
     }
 
-    func selectGroupFilter(_ filterGroup: FilterGroup) {
-        selectedGroupFilter = filterGroup
-        if let firstFilter = availableIndividualFilters.first {
-            selectIndividualFilter(firstFilter)
-        }
-
+    private func detect(_ category: FilterCategory) {
         withAnimation(transitionAnimation) {
-            isShowingIndividualFilters = true
+            _ = detectingCategories.insert(category)
+        }
+
+        detectionTasks[category] = Task {
+            defer {
+                detectionTasks[category] = nil
+                withAnimation(transitionAnimation) {
+                    _ = detectingCategories.remove(category)
+                }
+            }
+
+            do {
+                let detectionData = try await applicationService.detectData(in: photo.originalImage, for: category)
+                guard !Task.isCancelled else { return }
+                detectionCache[category] = detectionData
+                if selectedCategory == category, panelLevel == .categories {
+                    showLevel(.groups)
+                }
+            } catch is CancellationError {
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = "Failed to detect data: \(error.localizedDescription)"
+            }
         }
     }
 
-    func selectIndividualFilter(_ filterType: FilterType) {
-        selectedFilterConfiguration = FilterConfiguration(filter: filterType, intensity: 0)
-    }
-
-    func backToGroupFilters() {
-        withAnimation(transitionAnimation) {
-            isShowingIndividualFilters = false
-            selectedFilterConfiguration = nil
+    func toggleOverlay() {
+        if selectedCategory == .hair {
+            showHairMask.toggle()
+        } else {
+            showLandmarks.toggle()
         }
     }
 
-    func backToCategories() {
-        withAnimation(transitionAnimation) {
-            isShowingFilters = false
-            isShowingIndividualFilters = false
-            selectedCategory = nil
-            selectedGroupFilter = nil
-            selectedFilterConfiguration = nil
-        }
+    func toggleCompare() {
+        isComparing.toggle()
     }
 
-    func resetAllFilters() {
-        guard var photo else { return }
+    func savePhoto() async {
+        isSaving = true
+        isComparing = false
+        defer { isSaving = false }
 
-        errorMessage = nil
-        cancelRendering()
-
-        if let filter = selectedFilterConfiguration?.filter {
-            selectIndividualFilter(filter)
-        }
-
-        photo.updateProcessedImage(photo.originalImage)
-        self.photo = photo
-    }
-
-    func savePhoto() async -> Bool {
-        guard let photo else { return false }
+        await renderTask?.value
 
         do {
             try await applicationService.savePhoto(photo)
-            return true
+            withAnimation(transitionAnimation) {
+                isShowingSavedConfirmation = true
+            }
         } catch {
             errorMessage = error.localizedDescription
-            return false
         }
     }
 
-    func toggleLandmarks() {
-        showLandmarks.toggle()
+    func dismissSavedConfirmation() {
+        withAnimation(transitionAnimation) {
+            isShowingSavedConfirmation = false
+        }
     }
-
-    func toggleHairMask() {
-        showHairMask.toggle()
-    }
-
-    // MARK: - Zoom & Pan
 
     func resetZoom() {
         withAnimation(.spring()) {
@@ -234,8 +269,7 @@ final class EditorViewModel {
     }
 
     func updateScale(_ scale: CGFloat, in containerSize: CGSize) {
-        guard let imageSize = previewImage?.extent.size else { return }
-        zoomPan.updateScale(scale, imagePixelSize: imageSize, containerSize: containerSize)
+        zoomPan.updateScale(scale, imagePixelSize: previewImage.extent.size, containerSize: containerSize)
     }
 
     func finalizeScale() {
@@ -249,8 +283,7 @@ final class EditorViewModel {
     }
 
     func updateOffset(_ translation: CGSize, in containerSize: CGSize) {
-        guard let imageSize = previewImage?.extent.size else { return }
-        zoomPan.updateOffset(translation: translation, imagePixelSize: imageSize, containerSize: containerSize)
+        zoomPan.updateOffset(translation: translation, imagePixelSize: previewImage.extent.size, containerSize: containerSize)
     }
 
     func finalizeOffset() {

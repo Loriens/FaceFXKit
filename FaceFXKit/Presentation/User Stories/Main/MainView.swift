@@ -20,49 +20,45 @@ struct MainView: View {
 
     var body: some View {
         NavigationStack {
-            VStack {
-                Spacer()
-
-                VStack(spacing: 32) {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(.blue)
+            VStack(spacing: 32) {
+                VStack(spacing: 16) {
+                    Image(systemName: "faceid")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(Color.onAccent)
+                        .frame(width: 64, height: 64)
+                        .background(Color.accent, in: .rect(cornerRadius: 18))
+                        .accessibilityHidden(true)
 
                     Text("FaceFX Kit")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-
-                    Text("Select a photo to start editing")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-
-                    ProgressView()
-                        .scaleEffect(1.2)
-                        .padding()
-                        .opacity(viewModel.isLoading ? 1 : 0)
+                        .font(.system(size: 28, weight: .semibold))
+                        .tracking(-0.56)
+                        .foregroundStyle(Color.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
                 }
-
-                Spacer()
 
                 PhotosPicker(
                     selection: $imageSelection,
                     matching: .images,
                     photoLibrary: .shared()
                 ) {
-                    HStack {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.title2)
-                        Text("Select Photo from Gallery")
-                            .font(.headline)
+                    HStack(spacing: 10) {
+                        if viewModel.isLoading {
+                            ProgressView()
+                                .tint(Color.onAccent)
+                        } else {
+                            Image(systemName: "photo")
+                                .font(.system(size: 18, weight: .semibold))
+                        }
+                        Text("Select Photo")
+                            .font(.system(size: 16, weight: .semibold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.onAccent)
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
-                    .background(.blue, in: .rect(cornerRadius: 16))
+                    .background(Color.accent, in: .rect(cornerRadius: 16))
                 }
+                .buttonStyle(.pressable)
                 .disabled(viewModel.isLoading)
-                .padding(.horizontal, 32)
-                .padding(.bottom, 64)
                 .onChange(of: imageSelection) { _, newValue in
                     guard let newValue else { return }
 
@@ -72,8 +68,10 @@ struct MainView: View {
                     }
                 }
             }
-            .navigationTitle("FaceFX Kit")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.appBackground)
+            .toolbarVisibility(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $viewModel.showingEditor) {
                 if let photo = viewModel.selectedPhoto {
                     EditorView(
@@ -81,8 +79,6 @@ struct MainView: View {
                         applicationService: dependencies.photoEditorApplicationService,
                         ciContext: dependencies.ciContextStore.primaryContext
                     )
-                        // Force fresh view identity (and a fresh view model) when
-                        // a different photo is opened.
                         .id(photo.id)
                 }
             }

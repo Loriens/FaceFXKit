@@ -13,7 +13,7 @@ struct HairMaskOverlayView: View {
     let imageScale: CGFloat
     let imageOffset: CGSize
     let ciContext: CIContext
-    var opacity = 0.6
+    var opacity = 0.45
 
     @State private var overlayImage: CGImage?
 
@@ -26,31 +26,31 @@ struct HairMaskOverlayView: View {
                     .scaleEffect(imageScale)
                     .offset(imageOffset)
                     .opacity(opacity)
-                    .blendMode(.multiply)
             }
         }
-        // `.task(id:)` cancels and restarts the render when the mask changes and
-        // on disappear, so a stale render can never overwrite a newer one.
+        .allowsHitTesting(false)
         .task(id: hairData.originalHairMask) {
             overlayImage = await Self.createColoredHairMask(
                 from: hairData.originalHairMask,
+                tint: CIColor(color: UIColor(resource: .accent)),
                 using: ciContext
             )
         }
     }
 
-    /// Renders the tinted hair mask off the main actor using the shared context.
     @concurrent
     private nonisolated static func createColoredHairMask(
         from hairMask: CIImage,
+        tint: CIColor,
         using context: CIContext
     ) async -> CGImage? {
         let colorMatrix = CIFilter(name: "CIColorMatrix")!
         colorMatrix.setValue(hairMask, forKey: kCIInputImageKey)
         colorMatrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputRVector")
-        colorMatrix.setValue(CIVector(x: 0, y: 1, z: 0, w: 0), forKey: "inputGVector")
-        colorMatrix.setValue(CIVector(x: 0, y: 1, z: 1, w: 0), forKey: "inputBVector")
-        colorMatrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        colorMatrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputGVector")
+        colorMatrix.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBVector")
+        colorMatrix.setValue(CIVector(x: 1, y: 0, z: 0, w: 0), forKey: "inputAVector")
+        colorMatrix.setValue(CIVector(x: tint.red, y: tint.green, z: tint.blue, w: 0), forKey: "inputBiasVector")
 
         guard let coloredMask = colorMatrix.outputImage else { return nil }
 

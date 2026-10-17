@@ -12,55 +12,74 @@ struct EditorTopBar: View {
     let dismiss: () -> Void
 
     var body: some View {
-        HStack {
-            Button(viewModel.isShowingFilters ? "Back" : "Close", action: goBack)
-                .foregroundStyle(.primary)
+        HStack(spacing: 8) {
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 19, weight: .medium))
+                    .frame(width: 44, height: 44)
+                    .contentShape(.circle)
+            }
+            .accessibilityLabel("Close")
 
-            Spacer()
+            Spacer(minLength: 0)
 
+            if viewModel.panelLevel != .categories {
+                overlayToggle
+                    .transition(.opacity)
+            }
+
+            Spacer(minLength: 0)
+
+            saveButton
+        }
+        .buttonStyle(.pressable)
+        .padding(.leading, 6)
+        .padding(.trailing, 12)
+        .frame(height: 44)
+    }
+
+    private var overlayToggle: some View {
+        let isOn = viewModel.isOverlayVisible
+        let title = switch viewModel.selectedCategory {
+        case .hair: isOn ? "Hide Hair" : "Show Hair"
+        case .sizes: isOn ? "Hide Points" : "Show Points"
+        }
+        let isAvailable = viewModel.currentDetectionData != nil
+
+        return Button(action: viewModel.toggleOverlay) {
             HStack(spacing: 8) {
-                if viewModel.cachedDetectionData?.faceTrackingResult != nil {
-                    overlayToggle(viewModel.showLandmarks ? "Hide Points" : "Show Points", action: viewModel.toggleLandmarks)
-                }
-
-                if viewModel.cachedDetectionData?.hairSegmentationResult != nil {
-                    overlayToggle(viewModel.showHairMask ? "Hide Hair" : "Show Hair", action: viewModel.toggleHairMask)
-                }
+                Image(systemName: "eye")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(title)
             }
-
-            Button("Save") {
-                Task {
-                    if await viewModel.savePhoto() {
-                        dismiss()
-                    }
-                }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(isOn ? Color.accent : Color.textPrimary)
+            .padding(.horizontal, 14)
+            .frame(height: 36)
+            .background(isOn ? Color.accent.opacity(0.14) : .clear, in: .capsule)
+            .overlay {
+                Capsule().strokeBorder(isOn ? Color.accent : Color.border, lineWidth: 1)
             }
-            .fontWeight(.semibold)
-            .foregroundStyle(.primary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(Color(.systemBackground))
+        .disabled(!isAvailable)
+        .opacity(isAvailable ? 1 : 0.4)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
-    private func goBack() {
-        if viewModel.isShowingIndividualFilters {
-            viewModel.backToGroupFilters()
-        } else if viewModel.isShowingFilters {
-            viewModel.backToCategories()
-        } else {
-            dismiss()
+    private var saveButton: some View {
+        Button {
+            Task {
+                await viewModel.savePhoto()
+            }
+        } label: {
+            Text("Save")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.onAccent)
+                .padding(.horizontal, 18)
+                .frame(height: 36)
+                .background(Color.accent, in: .capsule)
         }
-
-        viewModel.resetAllFilters()
-    }
-
-    private func overlayToggle(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .font(.caption)
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color(.systemGray6), in: .rect(cornerRadius: 6))
+        .disabled(viewModel.isSaving)
+        .opacity(viewModel.isSaving ? 0.6 : 1)
     }
 }

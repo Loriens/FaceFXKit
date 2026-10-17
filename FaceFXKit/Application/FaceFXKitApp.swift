@@ -14,6 +14,7 @@ struct FaceFXKitApp: App {
     var body: some Scene {
         WindowGroup {
             MainView(dependencies: dependencies)
+                .preferredColorScheme(.dark)
         }
     }
 }

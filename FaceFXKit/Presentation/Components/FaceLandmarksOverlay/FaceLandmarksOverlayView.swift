@@ -13,70 +13,51 @@ struct FaceLandmarksOverlayView: View {
     let imageScale: CGFloat
     let imageOffset: CGSize
 
-    @State private var showFullView = false
-
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 ForEach(faceData.faces, id: \.id) { face in
-                    if showFullView {
-                        FaceBoundingBoxShape(observation: face.observation)
-                            .stroke(.green, lineWidth: 2)
-                    }
+                    FaceBoundingBoxShape(observation: face.observation)
+                        .stroke(Color.accent, style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                        .scaleEffect(imageScale)
+                        .offset(imageOffset)
 
                     if let landmarks = face.landmarks {
-                        landmarkRegionOverlay(region: landmarks.faceContour, color: .red, imageFrame: geometry.size)
-                        landmarkRegionOverlay(region: landmarks.leftEyebrow, color: .orange, imageFrame: geometry.size)
-                        landmarkRegionOverlay(region: landmarks.rightEyebrow, color: .orange, imageFrame: geometry.size)
-                        landmarkRegionOverlay(region: landmarks.leftEye, color: .green, imageFrame: geometry.size)
-                        landmarkRegionOverlay(region: landmarks.rightEye, color: .green, imageFrame: geometry.size)
-                        landmarkRegionOverlay(region: landmarks.outerLips, color: .purple, imageFrame: geometry.size)
-                        landmarkRegionOverlay(region: landmarks.innerLips, color: .blue, imageFrame: geometry.size)
+                        landmarkPoints(
+                            regions: [
+                                landmarks.faceContour,
+                                landmarks.leftEyebrow,
+                                landmarks.rightEyebrow,
+                                landmarks.leftEye,
+                                landmarks.rightEye,
+                                landmarks.outerLips,
+                                landmarks.innerLips
+                            ],
+                            imageFrame: geometry.size
+                        )
                     }
                 }
             }
         }
-        .overlay(alignment: .topTrailing) {
-            Button {
-                showFullView.toggle()
-            } label: {
-                Image(systemName: showFullView ? "eye.fill" : "eye.slash.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.white)
-                    .padding(12)
-                    .background(.black.opacity(0.6), in: .circle)
-            }
-            .padding(.trailing, 10)
-        }
+        .allowsHitTesting(false)
     }
 
-    private func landmarkRegionOverlay(
-        region: FaceObservation.Landmarks2D.Region,
-        color: Color,
+    private func landmarkPoints(
+        regions: [FaceObservation.Landmarks2D.Region],
         imageFrame: CGSize
     ) -> some View {
-        let points = region
-            .pointsInImageCoordinates(imageFrame, origin: .upperLeft)
-            .map { convertToScaledAndOffsetCoordinates($0, imageFrame: imageFrame) }
-        let isClosedPath = region.pointsClassification == .closedPath
+        let points = regions.flatMap { region in
+            region
+                .pointsInImageCoordinates(imageFrame, origin: .upperLeft)
+                .map { convertToScaledAndOffsetCoordinates($0, imageFrame: imageFrame) }
+        }
 
         return Canvas { context, _ in
-            guard let firstPoint = points.first else { return }
-
-            var path = Path()
-            path.move(to: firstPoint)
-            path.addLines(Array(points.dropFirst()))
-            if isClosedPath {
-                path.closeSubpath()
-            }
-            context.stroke(path, with: .color(color), lineWidth: 2)
-
             for point in points {
-                let dotRect = CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
-                context.fill(Path(ellipseIn: dotRect), with: .color(color))
+                let dotRect = CGRect(x: point.x - 2.8, y: point.y - 2.8, width: 5.6, height: 5.6)
+                context.fill(Path(ellipseIn: dotRect), with: .color(.accent))
             }
         }
-        .allowsHitTesting(false)
     }
 
     private func convertToScaledAndOffsetCoordinates(_ point: CGPoint, imageFrame: CGSize) -> CGPoint {

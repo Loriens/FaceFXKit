@@ -16,54 +16,37 @@ struct EditorView: View {
 
     init(photo: Photo, applicationService: PhotoEditorApplicationService, ciContext: CIContext) {
         self.ciContext = ciContext
-        // The view model is created once per view identity. The caller applies
-        // `.id(photo.id)` so a different photo always produces a fresh editor.
         _viewModel = State(initialValue: EditorViewModel(photo: photo, applicationService: applicationService))
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                Color(.systemBackground)
-
-                EditorImageCanvas(viewModel: viewModel, containerSize: geometry.size, ciContext: ciContext)
-
-                if viewModel.isFaceDetecting {
-                    DetectionProgressView(category: viewModel.selectedCategory)
-                }
-            }
-            .overlay(alignment: .bottom) {
-                FilterControlPanel(viewModel: viewModel)
-            }
-            .clipped()
-        }
-        .overlay(alignment: .top) {
+        VStack(spacing: 0) {
             EditorTopBar(viewModel: viewModel) {
                 dismiss()
             }
+
+            EditorImageCanvas(viewModel: viewModel, ciContext: ciContext)
+                .padding(.top, 8)
+
+            FilterControlPanel(viewModel: viewModel)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
         }
-        .background(Color(.systemBackground))
+        .foregroundStyle(Color.textPrimary)
+        .background(Color.appBackground)
+        .overlay {
+            if viewModel.isShowingSavedConfirmation {
+                SavedConfirmationSheet(
+                    appliedEdits: viewModel.appliedConfigurations.map { $0.filter.appliedSummary(intensity: $0.intensity) },
+                    keepEditing: viewModel.dismissSavedConfirmation,
+                    newPhoto: { dismiss() }
+                )
+            }
+        }
         .toolbarVisibility(.hidden, for: .navigationBar)
         .errorAlert(message: $viewModel.errorMessage)
         .onDisappear {
             viewModel.cancelPendingWork()
-        }
-    }
-}
-
-/// Progress indicator shown while detection runs for a selected category.
-struct DetectionProgressView: View {
-    let category: FilterCategory?
-
-    var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .tint(.white)
-                .scaleEffect(1.5)
-
-            Text(category == .hair ? "Analyzing hair..." : "Detecting faces...")
-                .foregroundStyle(.white)
-                .font(.headline)
         }
     }
 }
