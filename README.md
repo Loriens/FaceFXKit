@@ -16,8 +16,8 @@ A professional iOS photo editor application focused on facial feature enhancemen
 
 ## Requirements
 
-- iOS 27.0+
-- Xcode 27.0+
+- iOS 27
+- Xcode 27.2
 
 ---
 
