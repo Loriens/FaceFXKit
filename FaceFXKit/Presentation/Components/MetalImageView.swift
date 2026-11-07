@@ -64,16 +64,14 @@ struct MetalImageView: UIViewRepresentable {
             }
         }
 
-        nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-            MainActor.assumeIsolated {
-                view.setNeedsDisplay()
-            }
+        @MainActor
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            view.setNeedsDisplay()
         }
 
-        nonisolated func draw(in view: MTKView) {
-            MainActor.assumeIsolated {
-                render(in: view)
-            }
+        @MainActor
+        func draw(in view: MTKView) {
+            render(in: view)
         }
 
         private func render(in view: MTKView) {

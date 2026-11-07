@@ -172,12 +172,13 @@ final class EditorViewModel {
         guard renderTask == nil else { return }
 
         renderTask = Task {
+            defer {
+                renderTask = nil
+            }
+
             while !Task.isCancelled, needsRender {
                 needsRender = false
                 await render()
-            }
-            if !Task.isCancelled {
-                renderTask = nil
             }
         }
     }
@@ -244,7 +245,11 @@ final class EditorViewModel {
         isComparing = false
         defer { isSaving = false }
 
-        await renderTask?.value
+        // Wait for any pending render to complete, then check if
+        // another render was scheduled while we waited.
+        while renderTask != nil {
+            await renderTask?.value
+        }
 
         do {
             try await applicationService.savePhoto(photo)
